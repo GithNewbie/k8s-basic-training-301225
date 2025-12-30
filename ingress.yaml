@@ -1,0 +1,48 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: project-unified-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /()(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: project-frontend-service
+            port:
+              number: 80
+      - path: /api(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: project-backend-service
+            port:
+              number: 80
+
+# basic ver without rewrite
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: project-unified-ingress
+# spec:
+#   rules:
+#   - http:
+#       paths:
+#       - path: /api
+#         pathType: Prefix
+#         backend:
+#           service:
+#             name: project-backend-service
+#             port:
+#               number: 80
+#       - path: /
+#         pathType: Prefix
+#         backend:
+#           service:
+#             name: project-frontend-service
+#             port:
+#               number: 80

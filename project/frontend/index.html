@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>Frontend (Vue.js) — Demo</title>
+  <style>
+    body{font-family:Segoe UI,Roboto,Arial;margin:40px;background:#f6f8fa;color:#111}
+    .card{max-width:720px;margin:0 auto;padding:24px;border-radius:8px;background:#fff;box-shadow:0 6px 18px rgba(0,0,0,.08)}
+    h1{margin:0 0 8px;color:#0b5cff}
+    p{margin:8px 0}
+    #result{font-weight:700}
+    .error{color:#b00020}
+    button{margin-top:12px;padding:8px 12px;border:0;border-radius:6px;background:#0b5cff;color:#fff;cursor:pointer}
+    small{color:#666}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Frontend (Vue.js)</h1>
+    <p>Kết quả từ Backend: <span id="result">Loading...</span></p>
+    <p><small id="info">Đang cố gắng kết nối...</small></p>
+    <button id="reload">Lấy lại</button>
+  </div>
+
+  <script>
+    // Khi chạy local (docker run -p 3000:3000) ta truy cập backend trên port 3000.
+    // Khi deploy qua Ingress/proxy (ví dụ /api -> backend) thì sẽ dùng path relative '/api/data'.
+    function getBackendUrl() {
+      const host = location.hostname;
+      const isLocalHost = (host === 'localhost' || host === '127.0.0.1');
+      return isLocalHost ? `http://${host}:80/api/data` : '/api/data';
+    }
+
+    async function fetchData() {
+      const resultEl = document.getElementById('result');
+      const infoEl = document.getElementById('info');
+      resultEl.classList.remove('error');
+      infoEl.textContent = `Gọi ${getBackendUrl()}`;
+      try {
+        const res = await fetch(getBackendUrl(), {cache: "no-store"});
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        resultEl.textContent = data.message || JSON.stringify(data);
+        infoEl.textContent = 'Kết nối thành công';
+      } catch (err) {
+        resultEl.textContent = 'Lỗi kết nối Backend';
+        resultEl.classList.add('error');
+        infoEl.textContent = err.message || String(err);
+      }
+    }
+
+    document.getElementById('reload').addEventListener('click', fetchData);
+    fetchData();
+  </script>
+</body>
+</html>
