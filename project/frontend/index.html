@@ -28,7 +28,8 @@
     function getBackendUrl() {
       const host = location.hostname;
       const isLocalHost = (host === 'localhost' || host === '127.0.0.1');
-      return isLocalHost ? `http://${host}:80/api/data` : '/api/data';
+      // return isLocalHost ? `http://${host}:80/api/data` : '/api/data';
+      return isLocalHost ? `http://project-backend-service/api/data` : '/api/data';
     }
 
     async function fetchData() {

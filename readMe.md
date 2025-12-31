@@ -17,18 +17,27 @@ Requirements (restated)
    - Ingress routing for multiple apps (/ , /v2, /api)
 
 Repository layout (important files)
-- project/backend/Dockerfile, project/backend/server.js  
-- project/backend-v2/Dockerfile, project/backend/server.js  
-- project/frontend/Dockerfile, project/frontend/index.html  
-- ./backend-deployment.yaml  
-- ./backend-service.yaml  
-- ./backend-v2-deployment.yaml  
-- ./backend-v2-service.yaml
-- ./frontend-deployment.yaml  
-- ./frontend-service.yaml  
-- ./ingress.yaml  
-- ./backend-hpa.yaml  
-- ./kind-config.yaml  
+- project/
+  - backend/Dockerfile, backend/server.js (BE1)
+  - backend-v2/Dockerfile, backend-v2/server.js (BE2)
+  - frontend/Dockerfile, frontend/index.html (FE v1)
+- k8s-resources/
+  - ./backend-deployment.yaml  
+  - ./backend-service.yaml  
+  - ./backend-v2-deployment.yaml  
+  - ./backend-v2-service.yaml
+  - ./frontend-deployment.yaml  
+  - ./frontend-service.yaml  
+  - ./ingress.yaml  
+  - ./backend-hpa.yaml  
+  - ./kind-config.yaml  
+
+  - namespace-devops.yaml
+  - backend-v1-deployment-devops.yaml (Deployment + Service in namespace devops)
+  - backend-v2-deployment-devops.yaml (Deployment + Service in namespace devops)
+  - frontend-deployment-devops.yaml (Deployment + Service in namespace devops)
+  - be1-service-devops.yaml, be2-service-devops.yaml (optional alias services)
+  - ingress-devops.yaml (Ingress in namespace devops)
 
 Prerequisites
 - Docker (running)  
@@ -89,6 +98,20 @@ kubectl get endpoints project-backend-service project-backend-v2-service
 kubectl get endpoints project-backend-service project-backend-v2-service project-frontend-service
 ```
 
+If apply devops namespace:
+```powershell
+# Create namespace first
+kubectl apply -f ./k8s-resources/namespace-devops.yaml
+
+# Deploy resources in devops namespace
+kubectl apply -f ./k8s-resources/backend-v1-deployment-devops.yaml
+kubectl apply -f ./k8s-resources/backend-v2-deployment-devops.yaml
+kubectl apply -f ./k8s-resources/frontend-deployment-devops.yaml
+# optional alias services
+kubectl apply -f ./k8s-resources/be1-service-devops.yaml
+kubectl apply -f ./k8s-resources/be2-service-devops.yaml
+```
+
 5) Install Ingress Controller (nginx for Kind) and apply Ingress
 ```powershell
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
@@ -96,6 +119,10 @@ kubectl get pods -n ingress-nginx --watch
 # once ingress-nginx pods are Ready:
 kubectl apply -f ./ingress.yaml
 kubectl get ingress
+
+# if apply devops namespace
+kubectl apply -f ./k8s-resources/ingress.yaml
+kubectl get ingress -n devops
 ```
 
 Test via host (after ingress-nginx Ready)
@@ -114,6 +141,44 @@ curl http://localhost:3000/api/data
 
 kubectl port-forward svc/project-frontend-service 8080:80
 start http://localhost:8080
+```
+
+Test internal DNS / service‑to‑service (inside cluster)
+- Default DNS: <service>.<namespace>.svc.cluster.local
+- Example tests:
+```powershell
+kubectl run --rm -it curl-test --image=curlimages/curl --restart=Never -n devops -- /bin/sh -c "curl -s http://project-backend-service.devops/api/data"
+# alias service test (if be1 service created)
+kubectl run --rm -it curl-test --image=curlimages/curl --restart=Never -n devops -- /bin/sh -c "curl -s http://be1.devops/api/data"
+
+# Test with FQDN
+kubectl run --rm -it curl-test --image=curlimages/curl --restart=Never -n devops -- /bin/sh -c "curl -s http://project-backend-service.devops.svc.cluster.local/api/data"
+kubectl run --rm -it curl-test --image=curlimages/curl --restart=Never -n devops -- /bin/sh -c "curl -s http://project-backend-v2-service.devops.svc.cluster.local/api/data"
+```
+
+Internal DNS options (choose one)
+- Recommended (simple): Use namespace + service names. Example: project-backend.devops resolves inside cluster. Create alias Service (be1) that uses same selector to expose the same endpoints; then be1.devops works.
+  - Create alias service file: be1-service-devops.yaml (already in repo).
+- Alternative (global rewrite): Patch CoreDNS to rewrite *.va -> *.devops.svc.cluster.local (advanced, cluster‑wide change). Steps:
+  - Backup CoreDNS ConfigMap
+  - Apply coredns-rewrite-patch.yaml
+  - Restart CoreDNS: kubectl rollout restart deployment/coredns -n kube-system
+  - Test nslookup/curl inside cluster
+  - Rollback by restoring backup if needed
+
+Ingress notes
+- Ingress must be in same namespace as services, or use fully qualified backendService references (namespace field in v1 Ingress is the Ingress namespace; backend service name is resolved in that namespace).
+- Use `ingressClassName: nginx` and ensure ingress controller is Ready.
+- If you see 503: check `kubectl get endpoints -n devops` — services with no endpoints cause 503.
+- To update ingress rules:
+```powershell
+kubectl apply -f ./ingress-devops.yaml
+# or edit
+kubectl edit ingress project-unified-ingress -n devops
+```
+- To remove ingress:
+```powershell
+kubectl delete -f ./ingress-devops.yaml
 ```
 
 6) Add Resource limits and probes  
@@ -216,11 +281,44 @@ kubectl delete -f ./frontend-service.yaml
 kubectl delete -f ./backend-deployment.yaml
 kubectl delete -f ./backend-service.yaml
 
+# remove devops app resources
+kubectl delete -f ./k8s-resources/backend-v1-deployment-devops.yaml
+kubectl delete -f ./k8s-resources/backend-v2-deployment-devops.yaml
+kubectl delete -f ./k8s-resources/frontend-deployment-devops.yaml
+kubectl delete -f ./k8s-resources/be1-service-devops.yaml
+kubectl delete -f ./k8s-resources/be2-service-devops.yaml
+kubectl delete -f ./k8s-resources/ingress.yaml -n devops
+
+# rollback CoreDNS if patched
+kubectl apply -f ./k8s-resources/coredns.backup.yaml   # if you saved backup locally
+kubectl rollout restart deployment/coredns -n kube-system
+
+# delete ingress controller
+kubectl delete -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+
+# delete namespace
+kubectl delete namespace devops
+
 # delete kind cluster
 kind delete cluster --name k8s-learning
 ```
+
+Checklist: what to verify in your repo
+- Confirm these files exist and contain namespace: devops where required:
+  - namespace-devops.yaml
+  - backend-v1-deployment-devops.yaml
+  - backend-v2-deployment-devops.yaml
+  - frontend-deployment-devops.yaml
+  - ingress.yaml (namespace: devops)
+  - be1-service-devops.yaml, be2-service-devops.yaml (optional aliases)
+  - backend-hpa.yaml
+  - kind-config.yaml
+  - Dockerfiles for backend, backend-v2, frontend
+- If FE v2 desired: add frontend-v2 deployment + service files.
 
 Notes
 - Use relative paths in commands; do not hardcode local absolute paths.  
 - For Kind, `imagePullPolicy: Never` is recommended for loaded local images.  
 - For production or CI, push images to a registry and update manifests accordingly.
+- Browser clients must call ingress (use relative '/api' in FE). Pod internal calls use service DNS (be1.devops, project-backend.devops, or FQDN).
+- Always load local images into kind before applying deployments or use a registry and change imagePullPolicy.
